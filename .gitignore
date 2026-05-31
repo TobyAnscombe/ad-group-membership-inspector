@@ -1,0 +1,13 @@
+# --- Tool output ------------------------------------------------------------
+# Generated CSV/JSON contain real usernames, DNs and group structure.
+# This is sensitive directory data and must NEVER be committed.
+output/
+!output/.gitkeep
+group-membership-*.csv
+group-membership-*.json
+
+# --- OS / editor cruft ------------------------------------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*~

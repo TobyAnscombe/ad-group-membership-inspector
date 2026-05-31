@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AD Group Membership — Nesting Inspector</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dagre/0.8.5/dagre.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape-dagre/2.5.0/cytoscape-dagre.min.js"></script>
+<style>
+  :root {
+    --bg:        #0e1116;
+    --panel:     #161b22;
+    --panel-2:   #1c232d;
+    --line:      #2a323d;
+    --ink:       #e6edf3;
+    --ink-dim:   #8b98a5;
+    --ink-faint: #5b6671;
+    --accent:    #58e6c8;
+    /* scope semantics — these ARE the Entra-conversion map */
+    --global:    #f0a847;  /* Global       */
+    --universal: #4fc3f7;  /* Universal    */
+    --domlocal:  #c084fc;  /* DomainLocal  */
+    --user:      #ffffff;  /* the subject  */
+    --unresolved:#ef6f6c;  /* foreign/unresolved */
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'IBM Plex Sans', sans-serif;
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    grid-template-rows: 56px 1fr;
+    grid-template-areas: "head head" "side stage";
+    height: 100vh;
+    overflow: hidden;
+  }
+  header {
+    grid-area: head;
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #11161d, #0e1116);
+  }
+  header .mark {
+    font-family: 'IBM Plex Mono', monospace;
+    font-weight: 600; letter-spacing: -0.5px; font-size: 15px;
+    color: var(--ink);
+  }
+  header .mark b { color: var(--accent); }
+  header .meta {
+    margin-left: auto; font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px; color: var(--ink-dim); text-align: right; line-height: 1.4;
+  }
+  aside {
+    grid-area: side;
+    border-right: 1px solid var(--line);
+    background: var(--panel);
+    padding: 18px; overflow-y: auto;
+    display: flex; flex-direction: column; gap: 20px;
+  }
+  .stage { grid-area: stage; position: relative; }
+  #cy { width: 100%; height: 100%; display: block; }
+
+  h2 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px; font-weight: 600; letter-spacing: 1.5px;
+    text-transform: uppercase; color: var(--ink-faint);
+    margin: 0 0 10px 0;
+  }
+  .drop {
+    border: 1px dashed var(--line); border-radius: 10px;
+    padding: 22px 14px; text-align: center; cursor: pointer;
+    transition: border-color .15s, background .15s; color: var(--ink-dim);
+    font-size: 13px;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); background: var(--panel-2); color: var(--ink); }
+  .drop b { color: var(--accent); }
+  input[type=file] { display: none; }
+
+  .search {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--ink); border-radius: 8px; padding: 9px 11px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  }
+  .search:focus { outline: none; border-color: var(--accent); }
+
+  .filter { display: flex; flex-direction: column; gap: 8px; }
+  .filter label {
+    display: flex; align-items: center; gap: 9px; font-size: 13px;
+    cursor: pointer; user-select: none;
+  }
+  .filter input { accent-color: var(--accent); width: 15px; height: 15px; }
+  .swatch { width: 11px; height: 11px; border-radius: 50%; flex: 0 0 auto; }
+  .count { margin-left: auto; font-family: 'IBM Plex Mono', monospace;
+           font-size: 11px; color: var(--ink-faint); }
+
+  .legend { display: flex; flex-direction: column; gap: 7px; font-size: 12px; color: var(--ink-dim); }
+  .legend .row { display: flex; align-items: center; gap: 9px; }
+  .shape { width: 16px; height: 12px; border: 1.5px solid var(--ink-dim); flex: 0 0 auto; }
+  .shape.sec { border-radius: 50%; }
+  .shape.dist { border-radius: 2px; }
+
+  .btnrow { display: flex; gap: 8px; }
+  button {
+    flex: 1; background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--ink); border-radius: 8px; padding: 9px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .3px;
+    transition: border-color .15s, color .15s;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* node detail flyout */
+  .detail {
+    position: absolute; top: 16px; right: 16px; width: 320px; max-width: 42vw;
+    background: rgba(22,27,34,.96); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px; backdrop-filter: blur(6px);
+    box-shadow: 0 12px 40px rgba(0,0,0,.5); display: none;
+    font-size: 13px; line-height: 1.5;
+  }
+  .detail.show { display: block; }
+  .detail .title { font-family:'IBM Plex Mono',monospace; font-weight:600; font-size:14px;
+                   color: var(--ink); word-break: break-all; margin-bottom: 4px; }
+  .detail .tags { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 12px; }
+  .tag { font-family:'IBM Plex Mono',monospace; font-size:10px; letter-spacing:.5px;
+         padding: 3px 8px; border-radius: 20px; border: 1px solid var(--line); color: var(--ink-dim); }
+  .detail dl { margin: 0; display: grid; grid-template-columns: 78px 1fr; gap: 5px 10px; }
+  .detail dt { color: var(--ink-faint); font-size: 11px; font-family:'IBM Plex Mono',monospace; }
+  .detail dd { margin: 0; color: var(--ink-dim); word-break: break-all; }
+  .detail .close { position:absolute; top:10px; right:12px; cursor:pointer; color:var(--ink-faint);
+                   font-size:18px; line-height:1; background:none; border:none; width:auto; flex:none; }
+  .detail .close:hover { color: var(--accent); }
+  .hint { color: var(--ink-faint); font-size: 11px; line-height: 1.5; }
+  .empty { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+           color: var(--ink-faint); font-family:'IBM Plex Mono',monospace; font-size: 13px; text-align:center; }
+</style>
+</head>
+<body>
+<header>
+  <span class="mark">AD&nbsp;Nesting&nbsp;<b>Inspector</b></span>
+  <span class="meta" id="meta">no data loaded</span>
+</header>
+
+<aside>
+  <div>
+    <h2>Data</h2>
+    <label class="drop" id="drop">
+      Drop the <b>.json</b> here<br>or click to browse
+      <input type="file" id="file" accept=".json,application/json">
+    </label>
+  </div>
+
+  <div>
+    <h2>Find group</h2>
+    <input class="search" id="search" placeholder="type a group name…" autocomplete="off">
+  </div>
+
+  <div>
+    <h2>Scope filter</h2>
+    <div class="filter" id="filter">
+      <label><input type="checkbox" data-scope="Global" checked><span class="swatch" style="background:var(--global)"></span>Global<span class="count" data-c="Global">0</span></label>
+      <label><input type="checkbox" data-scope="Universal" checked><span class="swatch" style="background:var(--universal)"></span>Universal<span class="count" data-c="Universal">0</span></label>
+      <label><input type="checkbox" data-scope="DomainLocal" checked><span class="swatch" style="background:var(--domlocal)"></span>Domain&nbsp;Local<span class="count" data-c="DomainLocal">0</span></label>
+      <label><input type="checkbox" data-scope="Unresolved" checked><span class="swatch" style="background:var(--unresolved)"></span>Unresolved<span class="count" data-c="Unresolved">0</span></label>
+    </div>
+  </div>
+
+  <div>
+    <h2>Shape = category</h2>
+    <div class="legend">
+      <div class="row"><span class="shape sec"></span>Security group</div>
+      <div class="row"><span class="shape dist"></span>Distribution group</div>
+      <div class="row"><span class="shape sec" style="border-color:var(--user);background:var(--user)"></span>The user (root)</div>
+    </div>
+  </div>
+
+  <div>
+    <h2>View</h2>
+    <div class="btnrow">
+      <button id="fit">Fit</button>
+      <button id="reset">Reset</button>
+    </div>
+    <p class="hint" style="margin-top:12px">Click any node to trace every nesting path back to the user and see its details. Click empty space to clear.</p>
+  </div>
+</aside>
+
+<div class="stage">
+  <div id="cy"></div>
+  <div class="empty" id="empty">Load a membership .json to begin</div>
+  <div class="detail" id="detail">
+    <button class="close" id="detailClose">&times;</button>
+    <div class="title" id="dTitle"></div>
+    <div class="tags" id="dTags"></div>
+    <dl id="dList"></dl>
+  </div>
+</div>
+
+<script>
+const SCOPE_COLOR = {
+  Global: 'var(--global)', Universal: 'var(--universal)',
+  DomainLocal: 'var(--domlocal)', Unresolved: 'var(--unresolved)', User: 'var(--user)'
+};
+const EDGE_COLOR = { Direct: '#58e6c8', Primary: '#f0a847', Nested: '#3a4450' };
+
+let cy = null;
+let rootId = null;
+
+const css = getComputedStyle(document.documentElement);
+const v = name => css.getPropertyValue(name).trim();
+
+function scopeKey(node) {
+  if (node.type === 'user') return 'User';
+  if (!node.scope) return 'Unresolved';
+  return node.scope;
+}
+
+function buildElements(graph) {
+  const els = [];
+  for (const n of graph.nodes) {
+    const sk = scopeKey(n);
+    els.push({ data: {
+      id: n.id,
+      label: n.label,
+      type: n.type,
+      scope: sk,
+      category: n.category || (n.type === 'user' ? 'User' : 'Unknown'),
+      membershipType: n.membershipType,
+      depth: n.depth,
+      dn: n.dn,
+      description: n.description || '',
+      mail: n.mail || ''
+    }});
+  }
+  for (let i = 0; i < graph.edges.length; i++) {
+    const e = graph.edges[i];
+    els.push({ data: { id: 'e' + i, source: e.source, target: e.target, etype: e.type } });
+  }
+  return els;
+}
+
+function colorFor(ele) {
+  const sk = ele.data('type') === 'user' ? 'User' : ele.data('scope');
+  const map = { User:v('--user'), Global:v('--global'), Universal:v('--universal'),
+                DomainLocal:v('--domlocal'), Unresolved:v('--unresolved') };
+  return map[sk] || v('--ink-dim');
+}
+
+function render(graph) {
+  document.getElementById('empty').style.display = 'none';
+  rootId = graph.nodes.find(n => n.type === 'user')?.id;
+
+  if (cy) cy.destroy();
+  cy = cytoscape({
+    container: document.getElementById('cy'),
+    elements: buildElements(graph),
+    minZoom: 0.1, maxZoom: 3,
+    style: [
+      { selector: 'node', style: {
+          'label': 'data(label)', 'color': v('--ink'),
+          'font-family': 'IBM Plex Mono, monospace', 'font-size': 11,
+          'text-valign': 'bottom', 'text-margin-y': 5,
+          'background-color': colorFor, 'border-width': 1.5,
+          'border-color': '#0e1116', 'width': 22, 'height': 22,
+          'text-background-color': '#0e1116', 'text-background-opacity': 0.7,
+          'text-background-padding': 2
+      }},
+      { selector: 'node[type="user"]', style: {
+          'shape': 'diamond', 'width': 34, 'height': 34, 'font-size': 13,
+          'font-weight': 600, 'border-width': 2, 'border-color': v('--accent')
+      }},
+      { selector: 'node[category="Security"]',     style: { 'shape': 'ellipse' }},
+      { selector: 'node[category="Distribution"]', style: { 'shape': 'round-rectangle', 'width': 26 }},
+      { selector: 'node[scope="Unresolved"]', style: { 'border-color': v('--unresolved'), 'border-style': 'dashed' }},
+      { selector: 'edge', style: {
+          'width': 1.4, 'line-color': ele => EDGE_COLOR[ele.data('etype')] || '#3a4450',
+          'target-arrow-color': ele => EDGE_COLOR[ele.data('etype')] || '#3a4450',
+          'target-arrow-shape': 'triangle', 'arrow-scale': 0.8,
+          'curve-style': 'bezier', 'opacity': 0.55
+      }},
+      { selector: 'edge[etype="Direct"]',  style: { 'width': 2.2, 'opacity': 0.9 }},
+      { selector: 'edge[etype="Primary"]', style: { 'width': 2.2, 'opacity': 0.9, 'line-style': 'dashed' }},
+      { selector: '.faded', style: { 'opacity': 0.08 }},
+      { selector: '.hot', style: { 'opacity': 1, 'z-index': 99 }},
+      { selector: 'node.hot', style: { 'border-color': v('--accent'), 'border-width': 3 }},
+      { selector: 'edge.hot', style: { 'line-color': v('--accent'), 'target-arrow-color': v('--accent'), 'width': 2.6 }},
+      { selector: '.hidden', style: { 'display': 'none' }}
+    ],
+    layout: { name: 'dagre', rankDir: 'TB', nodeSep: 28, rankSep: 70, edgeSep: 12 }
+  });
+
+  cy.on('tap', 'node', evt => selectNode(evt.target));
+  cy.on('tap', evt => { if (evt.target === cy) clearSelection(); });
+
+  updateMeta(graph);
+  updateCounts();
+  cy.fit(undefined, 40);
+}
+
+// Trace every path from a node back to the root by walking edges upstream (toward groups)
+// and downstream contributors. We highlight the connected component reachable from the node
+// in the direction of the user, i.e. all ancestors (groups it belongs to) AND the chain
+// down to the user that grants it.
+function selectNode(node) {
+  const keep = cy.collection().union(node);
+
+  // ancestors: follow outgoing edges (member -> group), repeatedly
+  let frontier = node;
+  while (frontier.nonempty()) {
+    const out = frontier.outgoers('edge');
+    const next = out.targets().difference(keep);
+    keep.merge(out).merge(frontier.outgoers());
+    frontier = next;
+  }
+  // path(s) down to the user: follow incoming edges back toward the root
+  frontier = node;
+  while (frontier.nonempty()) {
+    const inc = frontier.incomers('edge');
+    const prev = inc.sources().difference(keep);
+    keep.merge(inc).merge(frontier.incomers());
+    frontier = prev;
+  }
+
+  cy.elements().addClass('faded').removeClass('hot');
+  keep.removeClass('faded').addClass('hot');
+  showDetail(node);
+}
+
+function clearSelection() {
+  if (!cy) return;
+  cy.elements().removeClass('faded hot');
+  document.getElementById('detail').classList.remove('show');
+}
+
+function showDetail(node) {
+  const d = node.data();
+  document.getElementById('dTitle').textContent = d.label;
+  const tags = [];
+  if (d.type === 'user') tags.push(['user', v('--user')]);
+  else {
+    tags.push([d.scope, SCOPE_COLOR[d.scope] || v('--ink-dim')]);
+    if (d.category && d.category !== 'Unknown') tags.push([d.category, v('--ink-dim')]);
+    tags.push([d.membershipType, EDGE_COLOR[d.membershipType] || v('--ink-dim')]);
+  }
+  document.getElementById('dTags').innerHTML = tags.map(
+    ([t, c]) => `<span class="tag" style="border-color:${c};color:${c}">${t}</span>`).join('');
+
+  const rows = [];
+  if (d.depth !== undefined && d.depth !== null) rows.push(['Depth', d.depth + ' hop' + (d.depth === 1 ? '' : 's') + ' from user']);
+  if (d.mail) rows.push(['Mail', d.mail]);
+  if (d.description) rows.push(['Notes', d.description]);
+  if (d.dn) rows.push(['DN', d.dn]);
+  document.getElementById('dList').innerHTML = rows.map(
+    ([k, val]) => `<dt>${k}</dt><dd>${escapeHtml(val)}</dd>`).join('');
+  document.getElementById('detail').classList.add('show');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function updateMeta(graph) {
+  const m = graph.metadata || {};
+  document.getElementById('meta').innerHTML =
+    `user <b style="color:var(--accent)">${escapeHtml(m.user || '?')}</b> · ` +
+    `${m.totalGroups ?? cy.nodes('[type="group"]').length} groups · ` +
+    `${escapeHtml((m.generated || '').slice(0,16).replace('T',' '))}`;
+}
+
+function updateCounts() {
+  const counts = { Global:0, Universal:0, DomainLocal:0, Unresolved:0 };
+  cy.nodes('[type="group"]').forEach(n => { counts[n.data('scope')] = (counts[n.data('scope')]||0)+1; });
+  for (const [k, val] of Object.entries(counts)) {
+    const el = document.querySelector(`[data-c="${k}"]`);
+    if (el) el.textContent = val;
+  }
+}
+
+function applyFilters() {
+  if (!cy) return;
+  const active = new Set([...document.querySelectorAll('#filter input:checked')].map(i => i.dataset.scope));
+  cy.nodes('[type="group"]').forEach(n => {
+    const show = active.has(n.data('scope'));
+    n.toggleClass('hidden', !show);
+    n.connectedEdges().toggleClass('hidden', !show);
+  });
+}
+
+// --- wiring ----------------------------------------------------------------------------
+const fileInput = document.getElementById('file');
+const drop = document.getElementById('drop');
+
+drop.addEventListener('click', () => fileInput.click());
+['dragover','dragenter'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', ev => { const f = ev.dataTransfer.files[0]; if (f) loadFile(f); });
+fileInput.addEventListener('change', ev => { const f = ev.target.files[0]; if (f) loadFile(f); });
+
+function loadFile(file) {
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const graph = JSON.parse(r.result);
+      if (!graph.nodes || !graph.edges) throw new Error('JSON is missing nodes/edges.');
+      render(graph);
+    } catch (err) {
+      alert('Could not parse that file:\n' + err.message);
+    }
+  };
+  r.readAsText(file);
+}
+
+document.getElementById('search').addEventListener('input', ev => {
+  if (!cy) return;
+  const q = ev.target.value.trim().toLowerCase();
+  if (!q) { clearSelection(); return; }
+  const hit = cy.nodes().filter(n => n.data('label').toLowerCase().includes(q));
+  cy.elements().addClass('faded').removeClass('hot');
+  hit.removeClass('faded').addClass('hot');
+  if (hit.nonempty()) cy.animate({ fit: { eles: hit, padding: 80 } }, { duration: 250 });
+});
+
+document.querySelectorAll('#filter input').forEach(i => i.addEventListener('change', applyFilters));
+document.getElementById('fit').addEventListener('click', () => cy && cy.fit(undefined, 40));
+document.getElementById('reset').addEventListener('click', () => { clearSelection(); document.getElementById('search').value=''; applyFilters(); cy && cy.fit(undefined, 40); });
+document.getElementById('detailClose').addEventListener('click', () => document.getElementById('detail').classList.remove('show'));
+</script>
+</body>
+</html>

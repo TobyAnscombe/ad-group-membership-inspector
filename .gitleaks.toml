@@ -1,0 +1,5 @@
+title = "Repository secret-scanning config"
+
+# Build on gitleaks' built-in rule set rather than replacing it.
+[extend]
+useDefault = true
