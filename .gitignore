@@ -11,3 +11,6 @@ group-membership-*.json
 Thumbs.db
 *.swp
 *~
+
+CLAUDE.md
+tasks/
