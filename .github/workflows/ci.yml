@@ -16,3 +16,6 @@ jobs:
     uses: TobyAnscombe/github-actions/.github/workflows/powershell-lint.yml@main
     with:
       settings_file: PSScriptAnalyzerSettings.psd1
+
+  claude-file-check:
+    uses: TobyAnscombe/github-actions/.github/workflows/claude-file-check.yml@main
