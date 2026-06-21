@@ -24,5 +24,7 @@ jobs:
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: [secret-scan, powershell-lint, claude-file-check]
     uses: TobyAnscombe/github-actions/.github/workflows/branch-protection.yml@main
+    secrets:
+      token: ${{ secrets.BRANCH_PROTECTION_TOKEN }}
     with:
       required_checks: '["secret-scan / Scan for secrets", "powershell-lint / powershell-lint", "claude-file-check / claude-file-check"]'
