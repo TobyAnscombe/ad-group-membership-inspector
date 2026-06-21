@@ -19,3 +19,12 @@ jobs:
 
   claude-file-check:
     uses: TobyAnscombe/github-actions/.github/workflows/claude-file-check.yml@main
+
+  protect-main:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [secret-scan, powershell-lint, claude-file-check]
+    uses: TobyAnscombe/github-actions/.github/workflows/branch-protection.yml@main
+    permissions:
+      administration: write
+    with:
+      required_checks: '["secret-scan / Scan for secrets", "powershell-lint / powershell-lint", "claude-file-check / claude-file-check"]'
